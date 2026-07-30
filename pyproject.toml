@@ -7,9 +7,23 @@ authors = [
 ]
 requires-python = "^3.14"
 dependencies = [
+    "fastapi[standard] (>=0.141.1,<0.142.0)",
+    "pydantic-settings (>=2.14.2,<3.0.0)",
+    "python-dotenv (>=1.2.2,<2.0.0)",
+    "sqlalchemy (>=2.0.51,<3.0.0)",
+    "pymysql (>=1.2.0,<2.0.0)",
+    "groq (>=1.6.0,<2.0.0)",
+    "httpx (>=0.28.1,<0.29.0)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-asyncio (>=1.4.0,<2.0.0)",
+    "ruff (>=0.16.0,<0.17.0)"
+]
