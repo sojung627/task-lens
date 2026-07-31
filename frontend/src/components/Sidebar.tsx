@@ -16,8 +16,7 @@ function FileIcon({ extension }: { extension: string }) {
       ? "fa-solid fa-volume-high"
       : "fa-regular fa-file-lines";
 
-  return
-  <i className={iconClass} aria-hidden="true" />;
+  return <i className={iconClass} aria-hidden="true" />;
 }
 
 export function Sidebar({ conversations, recentFiles, activeConversationId, onCreateConversation, onSelectConversation }: SidebarProps) {

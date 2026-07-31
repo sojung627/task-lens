@@ -1,4 +1,5 @@
 export type ConversationId = string;
+export type Priority = "urgent" | "high" | "normal" | "low" | "unspecified";
 
 export interface ConversationSummary {
   id: ConversationId;
@@ -31,11 +32,18 @@ export interface ChatMessage {
   attachments: ChatAttachment[];
 }
 
-export interface ChecklistItem {
+export interface TaskItem {
   id: string;
-  content: string;
-  completed: boolean;
-  dueLabel?: string;
+  title: string;
+  description: string | null;
+  order: number;
+  priority: Priority;
+  deadline: string | null;
+  assignee: string | null;
+  submission_target: string | null;
+  dependencies: string[];
+  completion_condition: string | null;
+  completed?: boolean;
 }
 
 export interface DifficultTerm {
@@ -44,12 +52,10 @@ export interface DifficultTerm {
 }
 
 export interface AnalysisResult {
-  summary: string[];
-  checklist: ChecklistItem[];
-  nextStep?: string;
-  deadline?: string;
-  confirmationItems: string[];
-  difficultTerms: DifficultTerm[];
+  core_goal: string;
+  tasks: TaskItem[];
+  confirmation_items: string[];
+  difficult_terms: DifficultTerm[];
   ambiguities: string[];
 }
 
@@ -62,15 +68,11 @@ export interface WorkspaceSnapshot {
 }
 
 export interface AnalyzeInstructionRequest {
-  conversationId?: ConversationId;
   message: string;
-  attachmentIds: string[];
 }
 
 export interface AnalyzeInstructionResponse {
-  conversationId: ConversationId;
-  userMessage: ChatMessage;
-  assistantMessage: ChatMessage;
+  request_id: string;
+  model: string;
   analysis: AnalysisResult;
-  conversation: ConversationSummary;
 }
