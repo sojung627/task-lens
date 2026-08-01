@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import { resolveDownloadUrl } from "../api/taskApi";
+import { chatFileMaxBytes } from "../config/ui";
 import type { ChatMessage, ConversationSummary, PendingFile } from "../types/workspace";
 
 interface ChatPanelProps {
@@ -51,12 +52,14 @@ const supportedExtensions = new Set([
   "webm",
   "flac",
 ]);
-const maxFileSize = 10 * 1024 * 1024;
 
 // 파일 크기를 사용자가 읽기 쉬운 단위로 변환한다.
 function formatSize(size: number): string {
   if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024) {
+    const sizeInKilobytes = size / 1024;
+    return `${Number.isInteger(sizeInKilobytes) ? sizeInKilobytes : sizeInKilobytes.toFixed(1)} KB`;
+  }
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -189,13 +192,13 @@ export function ChatPanel({
 
     const invalidFile = selectedFiles.find((file) => {
       const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-      return !supportedExtensions.has(extension) || file.size > maxFileSize;
+      return !supportedExtensions.has(extension) || file.size > chatFileMaxBytes;
     });
     if (invalidFile) {
       const extension = invalidFile.name.split(".").pop()?.toUpperCase() ?? "파일";
       setLocalError(
-        invalidFile.size > maxFileSize
-          ? `${invalidFile.name} 파일은 10MB를 초과해요.`
+        invalidFile.size > chatFileMaxBytes
+          ? `${invalidFile.name} 파일은 ${formatSize(chatFileMaxBytes)} 이하만 첨부할 수 있어요. 더 큰 파일은 내용을 나누어 업로드해 주세요.`
           : `${extension} 형식은 지원하지 않아요. 텍스트, 문서, 음성 파일을 올려 주세요.`,
       );
       return;
@@ -393,6 +396,7 @@ export function ChatPanel({
             >
               <i className="fa-solid fa-paperclip mr-1.5" />파일
             </button>
+
             <button
               type="button"
               className={`rounded-lg border px-[11px] py-[9px] text-[11px] ${

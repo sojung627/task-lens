@@ -23,7 +23,12 @@ from backend.app.schemas.chat import (
 )
 from backend.app.schemas.task_analysis import TaskItem
 from backend.app.services.chat_service import ChatService, ConversationNotFoundError
-from backend.app.services.file_service import FileReadError, FileService, FileValidationError
+from backend.app.services.file_service import (
+    FileReadError,
+    FileService,
+    FileSizeLimitError,
+    FileValidationError,
+)
 from backend.app.services.task_analysis_service import (
     MissingApiKeyError,
     UpstreamAuthenticationError,
@@ -52,6 +57,8 @@ def get_workspace_service() -> WorkspaceService:
 def _raise_for_chat_error(exc: Exception) -> None:
     if isinstance(exc, ConversationNotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, FileSizeLimitError):
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     if isinstance(exc, (FileValidationError, AudioValidationError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if isinstance(exc, FileReadError):

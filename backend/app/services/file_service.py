@@ -16,6 +16,10 @@ class FileReadError(Exception):
     pass
 
 
+class FileSizeLimitError(FileValidationError):
+    pass
+
+
 TEXT_EXTENSIONS = {
     "txt",
     "md",
@@ -69,6 +73,17 @@ class FileService:
 
         if not content:
             raise FileValidationError(f"{safe_name} 파일이 비어 있어요.")
+        if len(content) > self.settings.max_chat_file_bytes:
+            limit_in_kilobytes = self.settings.max_chat_file_bytes / 1024
+            limit_label = (
+                f"{int(limit_in_kilobytes)}KB"
+                if limit_in_kilobytes.is_integer()
+                else f"{limit_in_kilobytes:.1f}KB"
+            )
+            raise FileSizeLimitError(
+                f"{safe_name} 파일은 {limit_label} 이하만 첨부할 수 있어요. "
+                "더 큰 파일은 내용을 나누어 업로드해 주세요."
+            )
         if len(content) > self.settings.max_upload_bytes:
             raise FileValidationError(f"{safe_name} 파일은 업로드 제한 용량을 초과했어요.")
         return content, safe_name, extension
