@@ -46,17 +46,21 @@ class InvalidModelOutput:
     reason: str
 
 
-SYSTEM_PROMPT = """당신은 한국어 업무 지시를 실행 가능한 작업으로 구조화하는 분석기입니다.
+SYSTEM_PROMPT = """당신은 한국어 업무 지시와 회의 기록을 실행 가능한 작업으로 구조화하는 분석기입니다.
 반드시 JSON 객체 하나만 반환하세요. 마크다운 코드 블록과 설명문은 금지합니다.
-원문에 없는 기한, 담당자, 제출 대상을 만들지 말고 정보가 없으면 null을 사용하세요.
+원문에 없는 기한, 담당자, 제출 대상, 결정 사항을 만들지 말고 정보가 없으면 null 또는 빈 배열을 사용하세요.
 확인이 필요한 대상은 담당자로 확정하지 말고 confirmation_items에 넣으세요.
 조건부 작업과 선행 관계를 보존하고, 모든 실제 업무를 빠짐없이 tasks로 분리하세요.
+회의 기록이면 summary에 전체 요약, key_points에 핵심 논점, decisions에 확정된 결정만 넣으세요.
 어려운 용어가 없으면 difficult_terms는 빈 배열로 반환하세요.
 애매하거나 누락된 지시는 ambiguities에 넣으세요.
 
 반환 구조:
 {
+  "summary": "전체 요약 또는 null",
   "core_goal": "string",
+  "key_points": ["string"],
+  "decisions": ["string"],
   "tasks": [
     {
       "id": "task-1",
@@ -68,7 +72,9 @@ SYSTEM_PROMPT = """당신은 한국어 업무 지시를 실행 가능한 작업�
       "assignee": "string 또는 null",
       "submission_target": "string 또는 null",
       "dependencies": ["선행 작업 id"],
-      "completion_condition": "string 또는 null"
+      "completion_condition": "string 또는 null",
+      "status": "todo",
+      "completed": false
     }
   ],
   "confirmation_items": ["string"],
@@ -112,10 +118,10 @@ class TaskAnalysisService:
         raise UpstreamResponseError(corrected_result.reason)
 
     async def _request_model(
-        self,
-        message: str,
-        request_id: str,
-        correction: str | None,
+            self,
+            message: str,
+            request_id: str,
+            correction: str | None,
     ) -> str:
         user_content = message
         if correction:
@@ -227,8 +233,8 @@ class TaskAnalysisService:
 
     @staticmethod
     def _parse_and_validate(
-        content: str,
-        request_id: str,
+            content: str,
+            request_id: str,
     ) -> TaskAnalysisResult | InvalidModelOutput:
         try:
             parsed = json.loads(content)

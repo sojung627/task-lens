@@ -1,0 +1,47 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-qwen/qwen3.6-27b}
+      GROQ_AUDIO_MODEL: ${GROQ_AUDIO_MODEL:-whisper-large-v3-turbo}
+      GROQ_API_BASE_URL: ${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-60}
+      AI_MAX_RETRIES: ${AI_MAX_RETRIES:-1}
+      AI_INPUT_MAX_LENGTH: ${AI_INPUT_MAX_LENGTH:-12000}
+      DATABASE_URL: sqlite+pysqlite:////app/storage/tasklens.db
+      FRONTEND_ORIGIN: http://localhost:8080
+      STORAGE_DIRECTORY: /app/storage
+      ALLOW_DEGRADED_STARTUP: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 15s
+      timeout: 7s
+      retries: 8
+    volumes:
+      - tasklens_storage:/app/storage
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_API_TIMEOUT_MS: 60000
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  tasklens_storage:

@@ -9,13 +9,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 class Settings(BaseSettings):
     groq_api_key: SecretStr | None = None
-    groq_model: str
-    groq_api_base_url: str
-    ai_timeout_seconds: float = Field(gt=0, le=120)
-    ai_max_retries: int = Field(ge=0, le=1)
-    ai_input_max_length: int = Field(ge=100, le=100_000)
-    frontend_origin: str
+    groq_model: str = "qwen/qwen3.6-27b"
+    groq_audio_model: str = "whisper-large-v3-turbo"
+    groq_api_base_url: str = "https://api.groq.com/openai/v1"
+    ai_timeout_seconds: float = Field(default=60, gt=0, le=180)
+    ai_max_retries: int = Field(default=1, ge=0, le=1)
+    ai_input_max_length: int = Field(default=12_000, ge=100, le=100_000)
+    frontend_origin: str = "http://localhost:5173,http://127.0.0.1:5173"
+    storage_directory: Path = PROJECT_ROOT / "storage"
+    database_url: str = f"sqlite+pysqlite:///{(PROJECT_ROOT / 'storage' / 'tasklens.db').as_posix()}"
+    max_upload_bytes: int = Field(default=10_485_760, ge=1_024, le=52_428_800)
+    max_audio_bytes: int = Field(default=20_971_520, ge=1_024, le=26_214_400)
+    max_file_text_length: int = Field(default=40_000, ge=1_000, le=200_000)
+    max_generated_file_bytes: int = Field(default=2_097_152, ge=1_024, le=10_485_760)
     log_level: str = "INFO"
+    allow_degraded_startup: bool = True
+    testing: bool = False
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -31,13 +40,18 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: str) -> str:
+        normalized = value.strip()
+        supported_prefixes = ("sqlite+pysqlite://", "sqlite:///")
+        if not normalized.startswith(supported_prefixes):
+            raise ValueError("DATABASE_URL은 SQLite 형식이어야 합니다.")
+        return normalized
+
     @property
     def frontend_origins(self) -> list[str]:
-        return [
-            origin.strip()
-            for origin in self.frontend_origin.split(",")
-            if origin.strip()
-        ]
+        return [origin.strip() for origin in self.frontend_origin.split(",") if origin.strip()]
 
     @field_validator("log_level")
     @classmethod
@@ -47,4 +61,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    settings.storage_directory.mkdir(parents=True, exist_ok=True)
+    return settings

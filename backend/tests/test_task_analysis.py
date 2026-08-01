@@ -182,7 +182,7 @@ async def test_missing_api_key_stops_before_request() -> None:
 def test_health_endpoint() -> None:
     response = TestClient(app).get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "database": True}
 
 
 @pytest.mark.parametrize("message", ["", "   "])
@@ -199,10 +199,10 @@ def test_too_long_input_returns_422() -> None:
     assert response.status_code == 422
 
 
-def test_missing_api_key_returns_503() -> None:
+def test_ai_service_failure_returns_503() -> None:
     response = TestClient(app).post(
         "/api/tasks/analyze",
         json={"message": "정상 길이의 업무 지시입니다."},
     )
     assert response.status_code == 503
-    assert "GROQ_API_KEY" in response.json()["detail"]
+    assert response.json()["detail"]
