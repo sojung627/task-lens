@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -32,10 +32,12 @@ SYSTEM_PROMPT = """당신은 TaskLens AI 업무 정리 에이전트입니다.
 숫자, 한글, 영어, 긴 문장과 첨부 파일의 추출 내용을 모두 정상적인 사용자 입력으로 취급하세요.
 내부 추론 과정, 사고 과정, JSON, XML, 태그, 코드 블록 껍데기는 출력하지 마세요.
 첨부 파일이 있으면 파일 내용을 바탕으로 사용자가 요청한 분석·요약·질문 답변을 수행하세요.
-첨부 파일이 있으면 reply와 analysis를 반드시 함께 생성하되, JSON이 아닌 자연스러운 최종 답변도 허용됩니다.
+첨부 파일이 있으면 reply와 analysis를 반드시 함께 생성하세요.
+JSON이 아닌 자연스러운 최종 답변도 허용됩니다.
 요약 요청에서는 원문의 핵심을 빠뜨리지 말고 간결하게 정리하세요.
 원문에 없는 사실, 기한, 담당자, 제출 대상, 결정 사항은 만들지 마세요.
-사용자가 파일 생성을 요청한 경우에도 실제 파일 저장은 TaskLens 서버가 담당하므로, 생성할 파일의 최종 본문만 답변으로 작성하세요.
+사용자가 파일 생성을 요청해도 실제 파일 저장은 TaskLens 서버가 담당합니다.
+생성할 파일의 최종 본문만 답변으로 작성하세요.
 """
 
 
@@ -81,13 +83,10 @@ class ChatService:
     # 현재 UTC 시각을 ISO 문자열로 반환한다.
     @staticmethod
     def _timestamp() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     # 사용자 메시지와 첨부 파일을 AI에 전달하고 대화·분석·생성 파일을 저장한다.
     async def chat(self, request: ChatRequest) -> tuple[str, str, TaskAnalysisResult | None]:
-        if self.settings.groq_api_key is None:
-            raise MissingApiKeyError("AI 분석을 사용하려면 GROQ_API_KEY 설정이 필요해요.")
-
         is_new_conversation = request.conversation_id is None
         conversation_id = request.conversation_id or str(uuid4())
         if not is_new_conversation and not self.repository.conversation_exists(conversation_id):
@@ -95,16 +94,25 @@ class ChatService:
 
         prepared_uploads = await self._prepare_uploads(request)
         history = self._history(conversation_id) if not is_new_conversation else []
-        user_content = self._build_user_content(request.message, prepared_uploads)
-        model_output = await self._request_model(history, user_content)
         try:
+            if self.settings.groq_api_key is None:
+                raise MissingApiKeyError("AI 분석을 사용하려면 GROQ_API_KEY 설정이 필요해요.")
+            user_content = self._build_user_content(request.message, prepared_uploads)
+            model_output = await self._request_model(history, user_content)
             reply, generated_files, analysis = self._validate_output(model_output)
-        except UpstreamResponseError:
-            reply = self._sanitize_reply(model_output)
-            if not reply:
-                raise
-            generated_files = []
-            analysis = None
+        except (
+                MissingApiKeyError,
+                UpstreamAuthenticationError,
+                UpstreamRateLimitError,
+                UpstreamResponseError,
+                UpstreamTimeoutError,
+                UpstreamUnavailableError,
+        ) as exc:
+            logger.warning("chat_safe_fallback reason=%s", type(exc).__name__)
+            reply, generated_files, analysis = self._safe_fallback_output(
+                request,
+                prepared_uploads,
+            )
 
         analysis = self._ensure_analysis(request, prepared_uploads, reply, analysis)
         generated_files = self._ensure_generated_file(
@@ -213,7 +221,10 @@ class ChatService:
     @classmethod
     def _is_summary_request(cls, message: str) -> bool:
         normalized = cls._normalized_message(message)
-        return any(keyword in normalized for keyword in ("요약", "핵심정리", "간단히정리"))
+        return any(
+            keyword in normalized
+            for keyword in ("요약", "핵심정리", "간단히정리", "간추려", "간추림")
+        )
 
     # 사용자 문구가 다운로드 가능한 파일 생성 요청인지 판별한다.
     @classmethod
@@ -311,6 +322,33 @@ class ChatService:
             }
         )
 
+    # 외부 AI가 응답하지 못해도 사용자 입력과 첨부 파일을 저장할 안전한 결과를 만든다.
+    def _safe_fallback_output(
+            self,
+            request: ChatRequest,
+            uploads: list[PreparedUpload],
+    ) -> tuple[str, list[dict[str, str]], TaskAnalysisResult | None]:
+        if not uploads:
+            return (
+                "메시지를 정상적으로 받았어요. "
+                "AI 답변 생성이 지연되고 있어 잠시 후 다시 질문해 주세요.",
+                [],
+                None,
+            )
+
+        readable_sections: list[str] = []
+        per_file_limit = max(500, min(4_000, self.settings.ai_input_max_length // len(uploads)))
+        for upload in uploads:
+            extracted_text = upload.extracted_text.strip()
+            if len(extracted_text) > per_file_limit:
+                extracted_text = extracted_text[:per_file_limit].rstrip() + "\n[이후 내용 생략]"
+            readable_sections.append(f"[{upload.safe_name}]\n{extracted_text}")
+
+        reply = "파일을 정상적으로 받았어요.\n\n" + "\n\n".join(readable_sections)
+        generated_files = self._ensure_generated_file(request, uploads, reply, [])
+        analysis = self._ensure_analysis(request, uploads, reply, None)
+        return reply, generated_files, analysis
+
     # 모델이 생성한 파일 정보를 검증하고 저장 가능한 바이트 데이터로 변환한다.
     def _prepare_generated_files(
             self,
@@ -350,21 +388,33 @@ class ChatService:
 
     # 사용자 문구와 모든 첨부 파일의 추출 텍스트를 설정된 총량 안에서 결합한다.
     def _build_user_content(self, message: str, uploads: list[PreparedUpload]) -> str:
+        total_input_budget = self.settings.ai_input_max_length
         user_content = message or "첨부한 내용을 읽고 핵심과 실행할 업무를 정리해 주세요."
         if not uploads:
-            return user_content
+            return user_content[:total_input_budget]
 
-        total_file_budget = self.settings.max_file_text_length
-        per_file_budget = max(1, total_file_budget // len(uploads))
+        message_budget = max(256, total_input_budget // 3)
+        if len(user_content) > message_budget:
+            user_content = user_content[:message_budget].rstrip() + "\n[요청 일부 생략]"
+
+        section_header = "\n\n첨부 파일 내용:\n"
+        file_labels = [f"파일명: {upload.safe_name}\n추출 내용:\n" for upload in uploads]
+        structural_length = len(user_content) + len(section_header) + sum(map(len, file_labels))
+        total_file_budget = min(
+            self.settings.max_file_text_length,
+            max(0, total_input_budget - structural_length),
+        )
+        per_file_budget = total_file_budget // len(uploads)
         file_contexts: list[str] = []
-        for upload in uploads:
+        for upload, file_label in zip(uploads, file_labels, strict=True):
             extracted_text = upload.extracted_text[:per_file_budget]
             if len(upload.extracted_text) > per_file_budget:
-                extracted_text += "\n[파일 내용 일부가 입력 한도에 맞춰 생략되었습니다.]"
-            file_contexts.append(
-                f"파일명: {upload.safe_name}\n추출 내용:\n{extracted_text}"
-            )
-        return user_content + "\n\n첨부 파일 내용:\n" + "\n\n".join(file_contexts)
+                omission_notice = "\n[파일 내용 일부 생략]"
+                notice_budget = max(0, per_file_budget - len(omission_notice))
+                extracted_text = upload.extracted_text[:notice_budget] + omission_notice
+            file_contexts.append(file_label + extracted_text)
+        combined_content = user_content + section_header + "\n\n".join(file_contexts)
+        return combined_content[:total_input_budget]
 
     # 현재 요청 크기에 맞춰 가장 최근 대화 기록만 모델 입력에 포함한다.
     def _trim_history(
@@ -372,10 +422,7 @@ class ChatService:
             history: list[dict[str, str]],
             user_content: str,
     ) -> list[dict[str, str]]:
-        total_input_budget = max(
-            self.settings.ai_input_max_length,
-            self.settings.max_file_text_length,
-        )
+        total_input_budget = self.settings.ai_input_max_length
         remaining_budget = max(0, total_input_budget - len(user_content))
         selected_reversed: list[dict[str, str]] = []
         for message in reversed(history):
@@ -446,6 +493,13 @@ class ChatService:
                 or "tpm" in error_message
         )
 
+    # 모델별 입력 형식·용량·일시 장애이면 설정된 대체 모델을 사용할지 결정한다.
+    @staticmethod
+    def _should_use_fallback(response: httpx.Response) -> bool:
+        if response.status_code in {401, 403, 429}:
+            return False
+        return response.status_code >= 400
+
     # Groq HTTP 응답을 사용자용 모델 문자열로 검증해 반환한다.
     @staticmethod
     def _extract_model_content(response: httpx.Response) -> str:
@@ -512,7 +566,7 @@ class ChatService:
             )
             fallback_model = self.settings.groq_fallback_model.strip()
             should_fallback = (
-                    self._is_tpm_rejection(response)
+                    self._should_use_fallback(response)
                     and fallback_model
                     and fallback_model != self.settings.groq_model
             )
@@ -674,7 +728,9 @@ class ChatService:
                         return cls._sanitize_reply(recovered_reply), [], None
                     # JSON이 아닌 정상 자연어 응답만 화면에 전달하고 구조 문자열은 숨긴다.
                     if normalized_content.lstrip().startswith(("{", "[")):
-                        raise UpstreamResponseError("AI 답변을 화면용 문장으로 변환하지 못했어요.")
+                        raise UpstreamResponseError(
+                            "AI 답변을 화면용 문장으로 변환하지 못했어요."
+                        ) from None
                     return cls._sanitize_reply(normalized_content), [], None
             else:
                 # JSON이 아닌 정상 자연어 응답을 그대로 사용자에게 전달한다.

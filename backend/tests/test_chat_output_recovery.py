@@ -120,6 +120,7 @@ def test_safe_fallback_creates_downloadable_file_for_attachment_request(tmp_path
     settings.storage_directory = tmp_path
     settings.max_upload_bytes = 5_000_000
     settings.max_generated_file_bytes = 5_000_000
+    settings.ai_input_max_length = 12_000
     service = ChatService(settings, Mock(), FileService(settings))
     request = ChatRequest(
         message="짧게 간추려",

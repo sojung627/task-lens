@@ -72,11 +72,12 @@ async def test_tpm_413_falls_back_without_reserving_8192_output_tokens(tmp_path)
     assert requested_models == ["qwen/qwen3.6-27b", "groq/compound-mini"]
 
 
-# 숫자와 한글·영어 12000자가 요청 스키마를 통과하는지 확인한다.
+# 숫자와 한글·영어·특수문자가 요청 스키마를 통과하는지 확인한다.
 def test_numbers_and_12000_character_messages_are_valid() -> None:
     assert ChatRequest(message="1").message == "1"
     assert len(ChatRequest(message="가" * 12_000).message) == 12_000
     assert len(ChatRequest(message="a" * 12_000).message) == 12_000
+    assert ChatRequest(message="!@#$%^&*()_+-=[]{};':\",./<>?\\|").message
 
 
 # 한글과 영어 12000자가 기본 모델 413 후 대체 모델에서 정상 처리되는지 확인한다.
@@ -152,10 +153,68 @@ def test_file_context_uses_total_budget_across_all_files(tmp_path) -> None:
 
     assert "첫째.txt" in user_content
     assert "둘째.txt" in user_content
-    assert "가" * 2_000 in user_content
-    assert "가" * 2_001 not in user_content
-    assert "나" * 2_000 in user_content
-    assert "나" * 2_001 not in user_content
+    assert len(user_content) <= settings.ai_input_max_length
+    assert "가" * 1_000 in user_content
+    assert "나" * 1_000 in user_content
+
+
+# 긴 대화 기록과 파일 내용이 함께 있어도 모델 입력 한도를 넘지 않는지 확인한다.
+def test_long_history_and_file_content_stay_within_input_budget(tmp_path) -> None:
+    from backend.app.services.chat_service import PreparedUpload
+
+    settings = make_settings(tmp_path, ai_input_max_length=12_000, max_file_text_length=40_000)
+    service = ChatService(
+        settings,
+        repository=None,  # type: ignore[arg-type]
+        file_service=FileService(settings),
+    )
+    upload = PreparedUpload(
+        file_id="1",
+        safe_name="긴문서.txt",
+        extension="txt",
+        mime_type="text/plain",
+        content=b"",
+        extracted_text="파일본문" * 20_000,
+    )
+    user_content = service._build_user_content("요약해줘", [upload])
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": "이전대화" * 2_000}
+        for index in range(20)
+    ]
+    trimmed_history = service._trim_history(history, user_content)
+
+    dynamic_input_length = len(user_content) + sum(
+        len(message["content"]) for message in trimmed_history
+    )
+    assert len(user_content) <= settings.ai_input_max_length
+    assert dynamic_input_length <= settings.ai_input_max_length
+
+
+# 기본 모델의 일반 400 오류도 대체 모델로 전환해 502를 막는지 확인한다.
+@pytest.mark.asyncio
+async def test_primary_model_400_uses_fallback_model(tmp_path) -> None:
+    requested_models: list[str] = []
+
+    # 첫 모델의 요청 형식 오류 뒤 대체 모델에서 정상 답변을 반환한다.
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_body = json.loads(request.content)
+        requested_models.append(request_body["model"])
+        if len(requested_models) == 1:
+            return httpx.Response(400, json={"error": {"message": "unsupported field"}})
+        return httpx.Response(200, json=groq_response("대체 모델 정상 답변이에요."))
+
+    settings = make_settings(tmp_path)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = ChatService(
+            settings,
+            repository=None,  # type: ignore[arg-type]
+            file_service=FileService(settings),
+            http_client=client,
+        )
+        result = await service._request_model([], "특수문자 !@#$와 한글 English 123")
+
+    assert result == "대체 모델 정상 답변이에요."
+    assert requested_models == ["qwen/qwen3.6-27b", "groq/compound-mini"]
 
 
 # 실제 파일 요청이 413 후 대체 모델에서 성공해 저장까지 완료되는지 확인한다.
@@ -215,3 +274,35 @@ async def test_file_chat_succeeds_after_tpm_fallback(tmp_path) -> None:
     assert assistant_message_id
     assert call_count == 2
     assert repository.list_message_files(assistant_message_id)
+
+
+# AI 설정이 없어도 사용자 메시지와 첨부 파일 자체는 정상 저장되는지 확인한다.
+@pytest.mark.asyncio
+async def test_file_and_special_character_chat_are_saved_without_api_key(tmp_path) -> None:
+    from sqlalchemy import create_engine
+
+    settings = make_settings(tmp_path, groq_api_key=None)
+    engine = create_engine(settings.database_url)
+    repository = WorkspaceRepository(engine)
+    repository.create_tables()
+    encoded_file = base64.b64encode("한글 English 123 !@#$%^&*()".encode()).decode()
+    service = ChatService(settings, repository, FileService(settings))
+
+    conversation_id, assistant_message_id, analysis = await service.chat(
+        ChatRequest(
+            message="요약해줘: 한글 English 123 !@#$%^&*()",
+            files=[
+                {
+                    "name": "특수문자.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": encoded_file,
+                }
+            ],
+        )
+    )
+
+    stored_messages = repository.list_messages(conversation_id)
+    assert [message["role"] for message in stored_messages] == ["user", "assistant"]
+    assert repository.list_conversation_files(conversation_id)
+    assert assistant_message_id == stored_messages[-1]["id"]
+    assert analysis is not None

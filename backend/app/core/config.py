@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 class Settings(BaseSettings):
     groq_api_key: SecretStr | None = None
     groq_model: str = "qwen/qwen3.6-27b"
+    groq_fallback_model: str = "groq/compound-mini"
     groq_audio_model: str = "whisper-large-v3-turbo"
     groq_api_base_url: str = "https://api.groq.com/openai/v1"
     ai_timeout_seconds: float = Field(default=60, gt=0, le=180)
