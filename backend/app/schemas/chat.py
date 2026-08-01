@@ -2,7 +2,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from backend.app.schemas.task_analysis import Priority, TaskAnalysisResult, TaskItem
+from backend.app.schemas.task_analysis import (
+    Priority,
+    TaskAnalysisResult,
+    TaskItem,
+    TaskStatus,
+)
 
 
 class FileUploadPayload(BaseModel):
@@ -138,6 +143,7 @@ class TaskUpdatePayload(BaseModel):
     assignee: str | None = None
     submission_target: str | None = None
     completion_condition: str | None = None
+    status: TaskStatus | None = None
 
     @model_validator(mode="after")
     def require_at_least_one_field(self) -> "TaskUpdatePayload":
@@ -151,6 +157,7 @@ class TaskUpdatePayload(BaseModel):
                         self.assignee,
                         self.submission_target,
                         self.completion_condition,
+                        self.status,
                 )
         ):
             raise ValueError("변경할 항목을 하나 이상 입력해 주세요.")

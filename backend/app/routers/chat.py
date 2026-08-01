@@ -167,7 +167,9 @@ def update_task(conversation_id: str, task_id: str, request: TaskUpdatePayload) 
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없어요.")
 
     updates = request.model_dump(exclude_unset=True)
-    updated_task = analysis.tasks[target_index].model_copy(update=updates)
+    updated_task = TaskItem.model_validate(
+        {**analysis.tasks[target_index].model_dump(), **updates}
+    )
     updated_tasks = list(analysis.tasks)
     updated_tasks[target_index] = updated_task
     updated_analysis = analysis.model_copy(update={"tasks": updated_tasks})

@@ -50,6 +50,13 @@ function getErrorMessage(error: unknown): string {
   return GENERIC_ERROR_MESSAGE;
 }
 
+// 알림 저장 버튼을 눌렀을 때 브라우저 알림 권한을 요청한다.
+async function requestNotificationPermission(): Promise<void> {
+  if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+}
+
 export function useTaskWorkspace() {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [message, setMessage] = useState("");
@@ -295,6 +302,7 @@ export function useTaskWorkspace() {
       if (!conversationId) return false;
       setErrorMessage(null);
       try {
+        await requestNotificationPermission();
         const reminder = await createReminder({
           conversationId,
           taskId,
@@ -331,24 +339,48 @@ export function useTaskWorkspace() {
     }
   }, []);
 
-  const checkReminders = useCallback(async () => {
-    try {
-      const due = await getDueReminders();
-      setDueReminders(due);
-      if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-        return;
+    // 예약 시간이 지난 알림을 조회해 브라우저 알림으로 표시하고 전송 상태를 저장한다.
+    const checkReminders = useCallback(async () => {
+      try {
+        const due = await getDueReminders();
+        setDueReminders(due);
+
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+          return;
+        }
+
+        const deliveredReminderIds: string[] = [];
+
+        for (const reminder of due) {
+          if (notifiedReminderIds.current.has(reminder.id)) continue;
+
+          new Notification("TaskLens 업무 알림", {
+            body: reminder.message,
+          });
+
+          await updateReminderStatus(reminder.id, "delivered");
+          notifiedReminderIds.current.add(reminder.id);
+          deliveredReminderIds.push(reminder.id);
+        }
+
+        if (deliveredReminderIds.length > 0) {
+          const deliveredIdSet = new Set(deliveredReminderIds);
+
+          setWorkspace((current) => ({
+            ...current,
+            reminders: current.reminders.map((reminder) =>
+              deliveredIdSet.has(reminder.id)
+                ? { ...reminder, status: "delivered" }
+                : reminder,
+            ),
+          }));
+        }
+
+        setDueReminders([]);
+      } catch {
+        // 알림 확인 실패는 채팅과 체크리스트 기능을 막지 않는다.
       }
-      for (const reminder of due) {
-        if (notifiedReminderIds.current.has(reminder.id)) continue;
-        notifiedReminderIds.current.add(reminder.id);
-        new Notification("TaskLens 업무 알림", { body: reminder.message });
-        await updateReminderStatus(reminder.id, "delivered");
-      }
-      setDueReminders([]);
-    } catch {
-      // 알림 폴링 실패는 사용자의 주 작업을 막지 않아요.
-    }
-  }, []);
+    }, []);
 
   useEffect(() => {
     const initialTimerId = window.setTimeout(() => void checkReminders(), 0);
@@ -358,6 +390,37 @@ export function useTaskWorkspace() {
       window.clearInterval(intervalId);
     };
   }, [checkReminders]);
+
+    useEffect(() => {
+      const pendingTimes = workspace.reminders
+        .filter((reminder) => reminder.status === "pending")
+        .map((reminder) => Date.parse(reminder.remindAt))
+        .filter(Number.isFinite);
+
+      if (pendingTimes.length === 0) return undefined;
+
+      const nextReminderTime = Math.min(...pendingTimes);
+      let timerId: number;
+
+      // 브라우저 최대 타이머 길이를 넘는 먼 미래 알림도 단계적으로 예약한다.
+      const scheduleReminderCheck = () => {
+        const remainingMilliseconds = nextReminderTime - Date.now();
+
+        if (remainingMilliseconds <= 0) {
+          void checkReminders();
+          return;
+        }
+
+        timerId = window.setTimeout(
+          scheduleReminderCheck,
+          Math.min(remainingMilliseconds, 2_147_000_000),
+        );
+      };
+
+      scheduleReminderCheck();
+
+      return () => window.clearTimeout(timerId);
+    }, [checkReminders, workspace.reminders]);
 
   return {
     workspace,
