@@ -53,12 +53,14 @@ const supportedExtensions = new Set([
 ]);
 const maxFileSize = 10 * 1024 * 1024;
 
+// 파일 크기를 사용자가 읽기 쉬운 단위로 변환한다.
 function formatSize(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// 브라우저 파일을 API 전송용 Base64 문자열로 읽는다.
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -68,8 +70,19 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
+// 한 개의 사용자 또는 AI 메시지와 첨부 파일을 말풍선으로 표시한다.
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  // AI 답변 본문과 첨부 파일명을 클립보드에 복사한다.
+  const copyWholeResponse = async () => {
+    const fileNames = message.attachments.map((item) => `첨부 파일: ${item.name}`).join("\n");
+    const copyText = [message.content, fileNames].filter(Boolean).join("\n\n");
+    await navigator.clipboard.writeText(copyText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_500);
+  };
   return (
     <article className={`flex items-start gap-3 ${isUser ? "justify-end" : ""}`}>
       {!isUser && (
@@ -108,14 +121,26 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             ))}
           </div>
         )}
-        <time className="mt-[9px] block text-right text-[10px] text-[#9892aa]">
-          {message.createdAt}
-        </time>
+        <div className="mt-[9px] flex items-center justify-end gap-3 text-[10px] text-[#9892aa]">
+          {!isUser && (
+            <button
+              type="button"
+              className="border-0 bg-transparent text-[#766f88]"
+              onClick={() => void copyWholeResponse()}
+              aria-label="답변 전체 복사"
+            >
+              <i className={`${copied ? "fa-solid fa-check" : "fa-regular fa-copy"} mr-1`} />
+              {copied ? "복사됨" : "전체 복사"}
+            </button>
+          )}
+          <time>{message.createdAt}</time>
+        </div>
       </div>
     </article>
   );
 }
 
+// 대화 목록, 파일 첨부, 음성 녹음, 메시지 전송 화면을 관리한다.
 export function ChatPanel({
   activeConversation,
   messages,
@@ -152,6 +177,7 @@ export function ChatPanel({
     [],
   );
 
+  // 선택한 파일의 형식과 크기를 검사한 뒤 전송 대기 목록에 추가한다.
   const addFiles = async (files: FileList | null) => {
     if (!files) return;
     setLocalError(null);
@@ -194,6 +220,7 @@ export function ChatPanel({
     }
   };
 
+  // 마이크 녹음과 브라우저 실시간 음성 인식을 시작한다.
   const startRecording = async () => {
     setLocalError(null);
     setLiveTranscript("");
@@ -252,6 +279,7 @@ export function ChatPanel({
     }
   };
 
+  // 진행 중인 음성 인식과 녹음을 종료한다.
   const stopRecording = () => {
     speechRecognitionRef.current?.stop();
     speechRecognitionRef.current = null;
@@ -262,7 +290,7 @@ export function ChatPanel({
   };
 
   return (
-    <main className="flex min-h-[calc(100vh-72px)] min-w-0 flex-col bg-white/70 px-8 pb-3.5 max-[1180px]:px-5 max-[720px]:px-3.5">
+    <main className="flex h-[calc(100vh-72px)] min-h-0 min-w-0 flex-col overflow-hidden bg-white/70 px-8 pb-3.5 max-[1180px]:px-5 max-[720px]:h-[calc(100vh-129px)] max-[720px]:px-3.5">
       <header className="flex h-[78px] shrink-0 items-center justify-between gap-2 border-b border-[#f0edf5]">
         <div>
           <h1 className="m-0 text-lg font-bold tracking-[-0.02em]">
@@ -274,7 +302,7 @@ export function ChatPanel({
         </div>
       </header>
 
-      <section className="min-h-0 flex-1 overflow-y-auto">
+      <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
         <div className="mx-auto grid max-w-[760px] gap-[26px] py-6 pb-7">
           {messages.length > 0 ? (
             messages.map((chatMessage) => (

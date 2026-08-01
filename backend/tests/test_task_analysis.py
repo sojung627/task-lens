@@ -206,3 +206,107 @@ def test_ai_service_failure_returns_503() -> None:
     )
     assert response.status_code == 503
     assert response.json()["detail"]
+@pytest.mark.asyncio
+async def test_uploaded_file_analysis_returns_checklist(tmp_path) -> None:
+    import base64
+    from sqlalchemy import create_engine
+
+    from backend.app.repositories.workspace_repository import WorkspaceRepository
+    from backend.app.schemas.chat import ChatRequest
+    from backend.app.services.chat_service import ChatService
+    from backend.app.services.file_service import FileService
+
+    response_body = {
+        "reply": "파일 분석을 완료했어요. 체크리스트를 확인해 주세요.",
+        "generated_files": [],
+        "analysis": VALID_ANALYSIS,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_body = json.loads(request.content)
+        assert "첨부 파일이 있으면 reply와 analysis를 반드시 함께 생성" in request_body["messages"][0]["content"]
+        assert "response_format" not in request_body
+        return httpx.Response(200, json=groq_response(json.dumps(response_body)))
+
+    database_path = tmp_path / "analysis.db"
+    settings = make_settings(
+        storage_directory=tmp_path / "storage",
+        database_url=f"sqlite+pysqlite:///{database_path.as_posix()}",
+    )
+    engine = create_engine(settings.database_url)
+    repository = WorkspaceRepository(engine)
+    repository.create_tables()
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = ChatService(settings, repository, FileService(settings), http_client=client)
+        conversation_id, _, analysis = await service.chat(
+            ChatRequest(
+                message="이 파일을 분석해줘",
+                files=[
+                    {
+                        "name": "업무.txt",
+                        "mime_type": "text/plain",
+                        "content_base64": base64.b64encode("업무 내용".encode()).decode(),
+                    }
+                ],
+            )
+        )
+
+    assert conversation_id
+    assert analysis is not None
+    assert analysis.tasks[0].title == "허용되지 않은 Tool 호출 차단 확인"
+
+
+@pytest.mark.asyncio
+async def test_uploaded_file_summary_creates_downloadable_markdown(tmp_path) -> None:
+    import base64
+    from sqlalchemy import create_engine
+
+    from backend.app.repositories.workspace_repository import WorkspaceRepository
+    from backend.app.schemas.chat import ChatRequest
+    from backend.app.services.chat_service import ChatService
+    from backend.app.services.file_service import FileService
+
+    response_body = {
+        "reply": "문서의 핵심 내용을 요약했어요.",
+        "generated_files": [],
+        "analysis": None,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_body = json.loads(request.content)
+        assert "요약 요청" in request_body["messages"][0]["content"]
+        assert "response_format" not in request_body
+        return httpx.Response(200, json=groq_response(json.dumps(response_body)))
+
+    database_path = tmp_path / "summary.db"
+    settings = make_settings(
+        storage_directory=tmp_path / "storage",
+        database_url=f"sqlite+pysqlite:///{database_path.as_posix()}",
+    )
+    engine = create_engine(settings.database_url)
+    repository = WorkspaceRepository(engine)
+    repository.create_tables()
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = ChatService(settings, repository, FileService(settings), http_client=client)
+        conversation_id, assistant_message_id, analysis = await service.chat(
+            ChatRequest(
+                message="이 파일을 요약해줘",
+                files=[
+                    {
+                        "name": "이력서.txt",
+                        "mime_type": "text/plain",
+                        "content_base64": base64.b64encode("경력과 기술 내용".encode()).decode(),
+                    }
+                ],
+            )
+        )
+
+    generated_files = repository.list_message_files(assistant_message_id)
+    assert conversation_id
+    assert analysis is not None
+    assert len(generated_files) == 1
+    assert generated_files[0]["original_name"] == "이력서_요약.txt"
+    stored_content = FileService(settings).read_stored(generated_files[0]["stored_name"]).decode()
+    assert "문서의 핵심 내용을 요약했어요." in stored_content

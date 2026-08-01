@@ -10,8 +10,8 @@ import type {
 } from "../types/workspace";
 
 const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS);
-const requestTimeout = Number.isFinite(configuredTimeout) ? configuredTimeout : 60_000;
-const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "/api");
+const requestTimeout = Number.isFinite(configuredTimeout) ? configuredTimeout : 180_000;
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api");
 
 const apiClient = axios.create({
   baseURL: apiBaseUrl,

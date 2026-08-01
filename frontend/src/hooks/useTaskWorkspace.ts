@@ -35,31 +35,19 @@ const emptyWorkspace: WorkspaceSnapshot = {
   reminders: [],
 };
 
-function getErrorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return "요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.";
-  }
-  if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
-    return "처리 시간이 초과됐어요. 다시 시도해 주세요.";
-  }
-  if (!error.response) {
-    return "서비스에 연결할 수 없어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.";
-  }
+const GENERIC_ERROR_MESSAGE = "죄송합니다. 잠시 후 다시 시도해 주세요.";
 
-  const detail = error.response.data?.detail;
-  if (typeof detail === "string" && detail.trim()) {
-    return detail;
+function getErrorMessage(error: unknown): string {
+  // 서버 내부 사유나 개발자용 문구는 사용자 화면에 노출하지 않는다.
+  if (axios.isAxiosError(error)) {
+    console.error("TaskLens request failed", {
+      code: error.code,
+      status: error.response?.status,
+    });
+  } else {
+    console.error("TaskLens request failed", error);
   }
-  if (error.response.status === 422) {
-    return "입력 내용을 확인해 주세요.";
-  }
-  if (error.response.status === 429) {
-    return "현재 요청이 많아요. 잠시 후 다시 시도해 주세요.";
-  }
-  if (error.response.status === 504) {
-    return "처리 시간이 초과됐어요. 다시 시도해 주세요.";
-  }
-  return "요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.";
+  return GENERIC_ERROR_MESSAGE;
 }
 
 export function useTaskWorkspace() {
@@ -139,13 +127,29 @@ export function useTaskWorkspace() {
           content_base64: file.contentBase64,
         })),
       });
-      const refreshed = await getWorkspace(response.conversation_id);
-      setWorkspace({
-        ...refreshed,
-        analysis: response.analysis ?? refreshed.analysis,
-      });
+      // POST /chat 성공 결과를 먼저 화면에 반영해 후속 조회 실패가 전송 실패로 보이지 않게 한다.
+      setWorkspace((current) => ({
+        ...current,
+        activeConversationId: response.conversation_id,
+        messages: [
+          ...current.messages.filter((item) => item.id !== response.message.id),
+          response.message,
+        ],
+        analysis: response.analysis ?? current.analysis,
+      }));
       setMessage("");
       setAttachments([]);
+
+      try {
+        const refreshed = await getWorkspace(response.conversation_id);
+        setWorkspace({
+          ...refreshed,
+          analysis: response.analysis ?? refreshed.analysis,
+        });
+      } catch (refreshError) {
+        // 채팅과 파일 생성은 이미 성공했으므로 새로고침 실패만 개발자 콘솔에 남긴다.
+        console.warn("TaskLens workspace refresh failed after successful chat", refreshError);
+      }
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     } finally {

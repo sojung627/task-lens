@@ -41,7 +41,7 @@ TEXT_EXTENSIONS = {
 DOCUMENT_EXTENSIONS = TEXT_EXTENSIONS | {"pdf", "docx"}
 AUDIO_EXTENSIONS = {"mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm", "flac"}
 UPLOAD_EXTENSIONS = DOCUMENT_EXTENSIONS | AUDIO_EXTENSIONS
-GENERATED_EXTENSIONS = {"txt", "md", "csv", "json", "xml", "html", "css", "js", "ts", "py", "sql"}
+GENERATED_EXTENSIONS = TEXT_EXTENSIONS | {"pdf", "docx"}
 
 
 class FileService:
@@ -79,13 +79,87 @@ class FileService:
             raise FileValidationError("AI가 생성한 파일명이 올바르지 않아요.")
         extension = Path(safe_name).suffix.lower().lstrip(".")
         if extension not in GENERATED_EXTENSIONS:
-            raise FileValidationError(
-                "생성 파일은 TXT, MD, CSV, JSON, XML, HTML, CSS, JS, TS, PY, SQL 형식만 지원해요."
-            )
-        encoded = content.encode("utf-8")
+            supported = ", ".join(sorted(ext.upper() for ext in GENERATED_EXTENSIONS))
+            raise FileValidationError(f"생성 파일은 {supported} 형식만 지원해요.")
+
+        if extension == "pdf":
+            encoded = self._render_pdf(content)
+        elif extension == "docx":
+            encoded = self._render_docx(content)
+        else:
+            encoded = content.encode("utf-8")
         if len(encoded) > self.settings.max_generated_file_bytes:
             raise FileValidationError("AI가 생성한 파일이 허용 용량을 초과했어요.")
         return safe_name, extension, encoded
+
+
+    @property
+    def generated_extensions(self) -> set[str]:
+        return set(GENERATED_EXTENSIONS)
+
+    @staticmethod
+    def mime_type_for_extension(extension: str) -> str:
+        mime_types = {
+            "pdf": "application/pdf",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "json": "application/json",
+            "xml": "application/xml",
+            "html": "text/html",
+            "css": "text/css",
+            "csv": "text/csv",
+        }
+        return mime_types.get(extension, "text/plain")
+
+    @staticmethod
+    def _render_docx(content: str) -> bytes:
+        from docx import Document
+
+        buffer = io.BytesIO()
+        document = Document()
+        for line in content.splitlines() or [content]:
+            document.add_paragraph(line)
+        document.save(buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _render_pdf(content: str) -> bytes:
+        """AI가 만든 UTF-8 텍스트를 실제 PDF 바이트로 변환한다."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+        buffer = io.BytesIO()
+        pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=20 * mm,
+            rightMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
+            title="TaskLens generated document",
+        )
+        style = ParagraphStyle(
+            name="TaskLensKorean",
+            fontName="HYSMyeongJo-Medium",
+            fontSize=10.5,
+            leading=16,
+            wordWrap="CJK",
+        )
+        story = []
+        for line in content.splitlines() or [content]:
+            escaped = (
+                line.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            story.append(Paragraph(escaped or " ", style))
+            story.append(Spacer(1, 2 * mm))
+        document.build(story)
+        return buffer.getvalue()
 
     def save(self, content: bytes, extension: str) -> str:
         stored_name = f"{uuid4().hex}.{extension}"
