@@ -507,7 +507,7 @@ export function AnalysisPanel({
               className="mt-3 w-full rounded-lg border-0 bg-[#7546e5] px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
               type="button"
               disabled={!activeConversationId}
-              onClick={() => void saveNotes()}
+              onClick={() => void saveNotes()}  
             >
               노트 저장
             </button>
