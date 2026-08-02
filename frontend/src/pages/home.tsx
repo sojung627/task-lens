@@ -1,9 +1,11 @@
 import { AnalysisPanel } from "../components/AnalysisPanel";
 import { AppHeader } from "../components/AppHeader";
 import { ChatPanel } from "../components/ChatPanel";
+import { ReminderToast } from "../components/ReminderToast";
 import { Sidebar } from "../components/Sidebar";
 import { useTaskWorkspace } from "../hooks/useTaskWorkspace";
 
+// TaskLens의 전체 작업 화면과 자동 토스트 알림을 구성한다.
 export default function Home() {
   const {
     workspace,
@@ -42,6 +44,10 @@ export default function Home() {
       <AppHeader
         dueReminderCount={dueReminders.length}
         onCheckReminders={() => void checkReminders()}
+      />
+      <ReminderToast
+        reminders={dueReminders}
+        onDismiss={(reminderId) => void dismissReminder(reminderId)}
       />
 
       <div className="hidden border-b border-[#e9e7f3] bg-white p-3 max-[720px]:flex max-[720px]:items-center max-[720px]:gap-2">

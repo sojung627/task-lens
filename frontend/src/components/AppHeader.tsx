@@ -3,14 +3,8 @@ interface AppHeaderProps {
   onCheckReminders: () => void;
 }
 
+// TaskLens 로고와 현재 업무 알림 개수를 헤더에 표시한다.
 export function AppHeader({ dueReminderCount, onCheckReminders }: AppHeaderProps) {
-  const enableNotifications = async () => {
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      await Notification.requestPermission();
-    }
-    onCheckReminders();
-  };
-
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[#e9e7f3] bg-white/95 px-[26px] backdrop-blur-2xl max-[720px]:px-3.5">
       <a
@@ -28,13 +22,13 @@ export function AppHeader({ dueReminderCount, onCheckReminders }: AppHeaderProps
       </a>
       <div className="flex items-center gap-3">
         <span className="rounded-full bg-[#f4efff] px-3 py-2 text-xs font-bold text-[#7445e8] max-[560px]:hidden">
-          음성·문서 업무 자동 정리
+          문서 업무 자동 정리
         </span>
         <button
           className="relative grid h-[40px] w-[40px] place-items-center rounded-full border border-[#e6e1f1] bg-white text-[#6f667d]"
           type="button"
           aria-label="업무 알림 확인"
-          onClick={() => void enableNotifications()}
+          onClick={onCheckReminders}
         >
           <i className="fa-regular fa-bell" />
           {dueReminderCount > 0 && (

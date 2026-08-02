@@ -37,6 +37,7 @@ const emptyWorkspace: WorkspaceSnapshot = {
 
 const GENERIC_ERROR_MESSAGE = "죄송합니다. 잠시 후 다시 시도해 주세요.";
 
+// 요청 오류를 사용자에게 보여 줄 안전한 공통 문구로 변환한다.
 function getErrorMessage(error: unknown): string {
   // 서버 내부 사유나 개발자용 문구는 사용자 화면에 노출하지 않는다.
   if (axios.isAxiosError(error)) {
@@ -50,13 +51,7 @@ function getErrorMessage(error: unknown): string {
   return GENERIC_ERROR_MESSAGE;
 }
 
-// 알림 저장 버튼을 눌렀을 때 브라우저 알림 권한을 요청한다.
-async function requestNotificationPermission(): Promise<void> {
-  if (typeof Notification !== "undefined" && Notification.permission === "default") {
-    await Notification.requestPermission();
-  }
-}
-
+// TaskLens 작업공간의 조회, 채팅, 체크리스트, 알림 상태를 관리한다.
 export function useTaskWorkspace() {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [message, setMessage] = useState("");
@@ -302,7 +297,6 @@ export function useTaskWorkspace() {
       if (!conversationId) return false;
       setErrorMessage(null);
       try {
-        await requestNotificationPermission();
         const reminder = await createReminder({
           conversationId,
           taskId,
@@ -339,88 +333,93 @@ export function useTaskWorkspace() {
     }
   }, []);
 
-    // 예약 시간이 지난 알림을 조회해 브라우저 알림으로 표시하고 전송 상태를 저장한다.
-    const checkReminders = useCallback(async () => {
-      try {
-        const due = await getDueReminders();
-        setDueReminders(due);
+  // 예약 시간이 지난 알림을 조회해 페이지 내부 토스트로 표시하고 전송 상태를 저장한다.
+  const checkReminders = useCallback(async () => {
+    try {
+      const due = await getDueReminders();
+      const newDueReminders = due.filter(
+        (reminder) => !notifiedReminderIds.current.has(reminder.id),
+      );
 
-        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-          return;
-        }
+      if (newDueReminders.length === 0) return;
 
-        const deliveredReminderIds: string[] = [];
+      const deliveredReminders: ReminderSummary[] = [];
 
-        for (const reminder of due) {
-          if (notifiedReminderIds.current.has(reminder.id)) continue;
-
-          new Notification("TaskLens 업무 알림", {
-            body: reminder.message,
-          });
-
+      for (const reminder of newDueReminders) {
+        notifiedReminderIds.current.add(reminder.id);
+        try {
           await updateReminderStatus(reminder.id, "delivered");
-          notifiedReminderIds.current.add(reminder.id);
-          deliveredReminderIds.push(reminder.id);
+          deliveredReminders.push(reminder);
+        } catch {
+          notifiedReminderIds.current.delete(reminder.id);
         }
-
-        if (deliveredReminderIds.length > 0) {
-          const deliveredIdSet = new Set(deliveredReminderIds);
-
-          setWorkspace((current) => ({
-            ...current,
-            reminders: current.reminders.map((reminder) =>
-              deliveredIdSet.has(reminder.id)
-                ? { ...reminder, status: "delivered" }
-                : reminder,
-            ),
-          }));
-        }
-
-        setDueReminders([]);
-      } catch {
-        // 알림 확인 실패는 채팅과 체크리스트 기능을 막지 않는다.
       }
-    }, []);
+
+      if (deliveredReminders.length === 0) return;
+
+      setDueReminders((current) => {
+        const currentIds = new Set(current.map((reminder) => reminder.id));
+        return [
+          ...current,
+          ...deliveredReminders.filter((reminder) => !currentIds.has(reminder.id)),
+        ];
+      });
+
+      const deliveredIdSet = new Set(
+        deliveredReminders.map((reminder) => reminder.id),
+      );
+      setWorkspace((current) => ({
+        ...current,
+        reminders: current.reminders.map((reminder) =>
+          deliveredIdSet.has(reminder.id)
+            ? { ...reminder, status: "delivered" }
+            : reminder,
+        ),
+      }));
+    } catch {
+      // 알림 확인 실패는 채팅과 체크리스트 기능을 막지 않는다.
+    }
+  }, []);
 
   useEffect(() => {
     const initialTimerId = window.setTimeout(() => void checkReminders(), 0);
-    const intervalId = window.setInterval(() => void checkReminders(), 60_000);
+    const intervalId = window.setInterval(() => void checkReminders(), 10_000);
     return () => {
       window.clearTimeout(initialTimerId);
       window.clearInterval(intervalId);
     };
   }, [checkReminders]);
 
-    useEffect(() => {
-      const pendingTimes = workspace.reminders
-        .filter((reminder) => reminder.status === "pending")
-        .map((reminder) => Date.parse(reminder.remindAt))
-        .filter(Number.isFinite);
+  useEffect(() => {
+    const pendingTimes = workspace.reminders
+      .filter((reminder) => reminder.status === "pending")
+      .map((reminder) => Date.parse(reminder.remindAt))
+      .filter(Number.isFinite);
 
-      if (pendingTimes.length === 0) return undefined;
+    if (pendingTimes.length === 0) return undefined;
 
-      const nextReminderTime = Math.min(...pendingTimes);
-      let timerId: number;
+    const nextReminderTime = Math.min(...pendingTimes);
+    let timerId: number;
 
-      // 브라우저 최대 타이머 길이를 넘는 먼 미래 알림도 단계적으로 예약한다.
-      const scheduleReminderCheck = () => {
-        const remainingMilliseconds = nextReminderTime - Date.now();
+    // 브라우저 최대 타이머 길이를 넘는 먼 미래 알림도 단계적으로 예약한다.
+    const scheduleReminderCheck = () => {
+      const remainingMilliseconds = nextReminderTime - Date.now();
 
-        if (remainingMilliseconds <= 0) {
-          void checkReminders();
-          return;
-        }
+      if (remainingMilliseconds <= 0) {
+        void checkReminders();
+        return;
+      }
 
-        timerId = window.setTimeout(
-          scheduleReminderCheck,
-          Math.min(remainingMilliseconds, 2_147_000_000),
-        );
-      };
+      timerId = window.setTimeout(
+        scheduleReminderCheck,
+        Math.min(remainingMilliseconds, 2_147_000_000),
+      );
+    };
 
-      scheduleReminderCheck();
+    scheduleReminderCheck();
 
-      return () => window.clearTimeout(timerId);
-    }, [checkReminders, workspace.reminders]);
+    return () => window.clearTimeout(timerId);
+  }, [checkReminders, workspace.reminders]);
 
   return {
     workspace,

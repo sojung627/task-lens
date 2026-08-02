@@ -18,7 +18,6 @@ interface AnalysisPanelProps {
   sourceFiles: SourceFile[];
   notes: string;
   reminders: ReminderSummary[];
-  dueReminders: ReminderSummary[];
   onChangeTask: (taskId: string, changes: TaskUpdatePayload) => Promise<boolean>;
   onRemoveTask: (taskId: string) => void;
   onNotesChange: (content: string) => void;
@@ -28,7 +27,6 @@ interface AnalysisPanelProps {
     message: string,
     remindAt: string,
   ) => Promise<boolean>;
-  onDismissReminder: (reminderId: string) => void;
 }
 
 const cardClass =
@@ -49,6 +47,7 @@ const statusLabels: Record<TaskStatus, string> = {
   done: "완료",
 };
 
+// 문자열 목록을 제목이 있는 상세 카드로 표시한다.
 function DetailList({ title, items }: { title: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
@@ -63,6 +62,7 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+// 체크리스트 업무의 세부 내용을 편집하는 입력 화면을 표시한다.
 function TaskEditor({
   task,
   onSave,
@@ -160,19 +160,18 @@ function TaskEditor({
   );
 }
 
+// 분석 결과와 체크리스트 및 메모와 예약 설정 화면을 표시한다.
 export function AnalysisPanel({
   activeConversationId,
   analysis,
   sourceFiles,
   notes,
   reminders,
-  dueReminders,
   onChangeTask,
   onRemoveTask,
   onNotesChange,
   onSaveNotes,
   onAddReminder,
-  onDismissReminder,
 }: AnalysisPanelProps) {
   const [activeTab, setActiveTab] = useState<AnalysisTabId>("analysis");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -189,6 +188,7 @@ export function AnalysisPanel({
     ? Math.round((completedCount / analysis.tasks.length) * 100)
     : 0;
 
+  // 현재 대화의 메모를 저장하고 완료 상태를 잠시 표시한다.
   const saveNotes = async () => {
     const saved = await onSaveNotes();
     if (!saved) return;
@@ -196,6 +196,7 @@ export function AnalysisPanel({
     window.setTimeout(() => setNotesSaved(false), 1_500);
   };
 
+  // 입력한 문구와 예약 시각으로 새 업무 알림을 저장한다.
   const submitReminder = async () => {
     if (!reminderMessage.trim() || !reminderAt) return;
     const saved = await onAddReminder(
@@ -230,28 +231,6 @@ export function AnalysisPanel({
       </div>
 
       <div className="grid max-h-[calc(100vh-152px)] min-h-0 gap-4 overflow-y-auto py-[18px] max-[960px]:max-h-none">
-        {dueReminders.length > 0 && (
-          <section className="rounded-[13px] border border-[#f0d59b] bg-[#fff9e9] p-4">
-            <h2 className="m-0 flex items-center gap-2 text-sm font-bold text-[#795a13]">
-              <i className="fa-solid fa-bell" />지금 확인할 업무
-            </h2>
-            <ul className="mt-3 grid gap-2 p-0">
-              {dueReminders.map((reminder) => (
-                <li className="flex items-center justify-between gap-2 text-xs" key={reminder.id}>
-                  <span>{reminder.message}</span>
-                  <button
-                    className="shrink-0 rounded-lg border-0 bg-white px-2 py-1 text-[10px]"
-                    type="button"
-                    onClick={() => onDismissReminder(reminder.id)}
-                  >
-                    확인
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         {activeTab === "analysis" &&
           (analysis ? (
             <>
