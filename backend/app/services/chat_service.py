@@ -32,8 +32,40 @@ SYSTEM_PROMPT = """당신은 TaskLens AI 업무 정리 에이전트입니다.
 숫자, 한글, 영어, 긴 문장과 첨부 파일의 추출 내용을 모두 정상적인 사용자 입력으로 취급하세요.
 내부 추론 과정, 사고 과정, JSON, XML, 태그, 코드 블록 껍데기는 출력하지 마세요.
 첨부 파일이 있으면 파일 내용을 바탕으로 사용자가 요청한 분석·요약·질문 답변을 수행하세요.
-첨부 파일이 있으면 reply와 analysis를 반드시 함께 생성하세요.
-JSON이 아닌 자연스러운 최종 답변도 허용됩니다.
+첨부 파일이 있으면 반드시 아래 구조의 JSON 객체 하나만 반환하고 코드 블록은 사용하지 마세요.
+reply에는 사용자에게 보여 줄 자연스러운 최종 답변을 넣고 analysis에는 실제 분석 결과를 넣으세요.
+analysis.tasks는 파일에 포함된 서로 다른 실행 업무를 각각 분리해 모두 생성하세요.
+서로 다른 업무를 한 항목으로 합치지 말고 "AI 분석 결과 검토" 같은 공통 임시 제목은 절대 사용하지 마세요.
+첨부 파일이 없는 일반 대화만 JSON이 아닌 자연스러운 최종 답변을 허용합니다.
+{
+  "reply": "사용자에게 보여 줄 답변",
+  "generated_files": [],
+  "analysis": {
+    "summary": "전체 요약 또는 null",
+    "core_goal": "핵심 목표",
+    "key_points": ["핵심 내용"],
+    "decisions": [],
+    "tasks": [
+      {
+        "id": "task-1",
+        "title": "실제 업무 제목",
+        "description": "세부 설명 또는 null",
+        "order": 1,
+        "priority": "urgent|high|normal|low|unspecified",
+        "deadline": null,
+        "assignee": null,
+        "submission_target": null,
+        "dependencies": [],
+        "completion_condition": null,
+        "status": "todo",
+        "completed": false
+      }
+    ],
+    "confirmation_items": [],
+    "difficult_terms": [],
+    "ambiguities": []
+  }
+}
 요약 요청에서는 원문의 핵심을 빠뜨리지 말고 간결하게 정리하세요.
 원문에 없는 사실, 기한, 담당자, 제출 대상, 결정 사항은 만들지 마세요.
 사용자가 파일 생성을 요청해도 실제 파일 저장은 TaskLens 서버가 담당합니다.
@@ -281,7 +313,68 @@ class ChatService:
             }
         ]
 
-    # 첨부 파일 요청에서 분석 구조가 빠졌을 때 기본 분석 결과를 생성한다.
+    # 구조화 분석이 누락됐을 때 AI 답변과 파일 내용에서 실제 체크리스트 제목을 복구한다.
+    @staticmethod
+    def _fallback_task_titles(
+            uploads: list[PreparedUpload],
+            reply: str,
+    ) -> list[str]:
+        sources = [reply, *(upload.extracted_text for upload in uploads)]
+        marked_candidates: list[str] = []
+        plain_candidates: list[str] = []
+        ignored_sentences = {
+            "파일을 정상적으로 받았어요.",
+            "파일 분석을 완료했어요.",
+            "분석을 완료했어요.",
+            "체크리스트를 확인해 주세요.",
+        }
+
+        for source_index, source in enumerate(sources):
+            for raw_line in source.splitlines():
+                compact_line = re.sub(r"\s+", " ", raw_line).strip()
+                if not compact_line:
+                    continue
+
+                has_list_marker = bool(
+                    re.match(r"^(?:[-*•]+|\d+[.)]|[가-힣][.)])\s*", compact_line)
+                )
+                normalized_line = re.sub(
+                    r"^(?:[-*•]+|\d+[.)]|[가-힣][.)])\s*",
+                    "",
+                    compact_line,
+                ).strip()
+                if (
+                        len(normalized_line) < 4
+                        or normalized_line in ignored_sentences
+                        or normalized_line.startswith("[") and normalized_line.endswith("]")
+                ):
+                    continue
+
+                title = normalized_line[:160].rstrip()
+                if has_list_marker:
+                    marked_candidates.append(title)
+                elif source_index > 0:
+                    plain_candidates.append(title)
+
+        candidates = marked_candidates if marked_candidates else plain_candidates
+        unique_titles: list[str] = []
+        seen_titles: set[str] = set()
+        for candidate in candidates:
+            comparison_key = candidate.casefold()
+            if comparison_key in seen_titles:
+                continue
+            seen_titles.add(comparison_key)
+            unique_titles.append(candidate)
+            if len(unique_titles) == 12:
+                break
+
+        if unique_titles:
+            return unique_titles
+
+        source_stem = Path(uploads[0].safe_name).stem if uploads else "첨부 파일"
+        return [f"{source_stem} 내용 확인"]
+
+    # 첨부 파일 요청에서 분석 구조가 빠졌을 때 파일 내용 기반 분석 결과를 생성한다.
     @staticmethod
     def _ensure_analysis(
             request: ChatRequest,
@@ -294,6 +387,7 @@ class ChatService:
 
         source_name = uploads[0].safe_name
         key_points = [line.strip(" -•") for line in reply.splitlines() if line.strip()][:10]
+        task_titles = ChatService._fallback_task_titles(uploads, reply)
         return TaskAnalysisResult.model_validate(
             {
                 "summary": reply[:4000],
@@ -302,19 +396,20 @@ class ChatService:
                 "decisions": [],
                 "tasks": [
                     {
-                        "id": "task-1",
-                        "title": "AI 분석 결과 검토",
-                        "description": f"{source_name}에서 추출한 결과를 확인합니다.",
-                        "order": 1,
-                        "priority": "normal",
+                        "id": f"task-{index}",
+                        "title": title,
+                        "description": f"{source_name}에서 확인한 실행 항목입니다.",
+                        "order": index,
+                        "priority": "unspecified",
                         "deadline": None,
                         "assignee": None,
                         "submission_target": None,
                         "dependencies": [],
-                        "completion_condition": "답변과 분석 결과 확인 완료",
+                        "completion_condition": None,
                         "status": "todo",
                         "completed": False,
                     }
+                    for index, title in enumerate(task_titles, start=1)
                 ],
                 "confirmation_items": [],
                 "difficult_terms": [],
