@@ -30,7 +30,7 @@ interface AnalysisPanelProps {
 }
 
 const cardClass =
-  "rounded-[13px] border border-[#e1deeb] bg-white p-5 shadow-[0_10px_28px_rgba(58,43,97,0.035)]";
+  "min-w-0 max-w-full rounded-[13px] border border-[#e1deeb] bg-white p-5 shadow-[0_10px_28px_rgba(58,43,97,0.035)]";
 const headingClass = "m-0 flex items-center gap-[9px] text-base font-bold";
 
 const priorityLabels: Record<Priority, string> = {
@@ -53,7 +53,7 @@ function DetailList({ title, items }: { title: string; items: string[] }) {
   return (
     <section className={cardClass}>
       <h2 className={headingClass}>{title}</h2>
-      <ul className="mt-4 grid list-disc gap-2 pl-[18px] text-[13px] leading-[1.6]">
+      <ul className="mt-4 grid min-w-0 list-disc gap-2 break-words pl-[18px] text-[13px] leading-[1.6] [overflow-wrap:anywhere]">
         {items.map((item, index) => (
           <li key={`${item}-${index}`}>{item}</li>
         ))}
@@ -81,22 +81,22 @@ function TaskEditor({
   const [completionCondition, setCompletionCondition] = useState(task.completion_condition ?? "");
 
   return (
-    <div className="mt-3 grid gap-2 rounded-lg bg-[#faf9fd] p-3">
+    <div className="mt-3 grid min-w-0 max-w-full gap-2 rounded-lg bg-[#faf9fd] p-3">
       <input
-        className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs outline-none focus:border-[#8351e8]"
+        className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs outline-none focus:border-[#8351e8]"
         value={title}
         onChange={(event) => setTitle(event.target.value)}
         placeholder="작업 제목"
       />
       <textarea
-        className="min-h-20 rounded-lg border border-[#ded9e9] px-3 py-2 text-xs outline-none focus:border-[#8351e8]"
+        className="min-h-20 w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs outline-none focus:border-[#8351e8]"
         value={description}
         onChange={(event) => setDescription(event.target.value)}
         placeholder="세부 설명"
       />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid min-w-0 grid-cols-2 gap-2 max-[420px]:grid-cols-1">
         <select
-          className="rounded-lg border border-[#ded9e9] bg-white px-2 py-2 text-xs"
+          className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] bg-white px-2 py-2 text-xs"
           value={priority}
           onChange={(event) => setPriority(event.target.value as Priority)}
         >
@@ -105,26 +105,26 @@ function TaskEditor({
           ))}
         </select>
         <input
-          className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+          className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
           value={deadline}
           onChange={(event) => setDeadline(event.target.value)}
           placeholder="기한"
         />
         <input
-          className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+          className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
           value={assignee}
           onChange={(event) => setAssignee(event.target.value)}
           placeholder="담당자"
         />
         <input
-          className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+          className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
           value={submissionTarget}
           onChange={(event) => setSubmissionTarget(event.target.value)}
           placeholder="제출 대상"
         />
       </div>
       <input
-        className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+        className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
         value={completionCondition}
         onChange={(event) => setCompletionCondition(event.target.value)}
         placeholder="완료 조건"
@@ -210,7 +210,7 @@ export function AnalysisPanel({
   };
 
   return (
-    <aside className="min-w-0 border-l border-[#e9e7f3] bg-white/90 px-[18px] pb-[18px] max-[960px]:col-span-full max-[960px]:border-l-0 max-[960px]:border-t max-[720px]:px-3.5">
+    <aside className="min-w-0 max-w-full overflow-x-hidden border-l border-[#e9e7f3] bg-white/90 px-[18px] pb-[18px] max-[960px]:col-span-full max-[960px]:border-l-0 max-[960px]:border-t max-[720px]:px-3.5">
       <div className="grid h-[62px] grid-cols-3 border-b border-[#e4e1ed]" role="tablist">
         {analysisTabs.map((tab) => (
           <button
@@ -230,7 +230,7 @@ export function AnalysisPanel({
         ))}
       </div>
 
-      <div className="grid max-h-[calc(100vh-152px)] min-h-0 gap-4 overflow-y-auto py-[18px] max-[960px]:max-h-none">
+      <div className="grid max-h-[calc(100vh-152px)] min-h-0 min-w-0 max-w-full gap-4 overflow-x-hidden overflow-y-auto py-[18px] max-[960px]:max-h-none">
         {activeTab === "analysis" &&
           (analysis ? (
             <>
@@ -239,7 +239,7 @@ export function AnalysisPanel({
                   <h2 className={headingClass}>
                     <i className="fa-regular fa-file-lines text-[#8050eb]" />전체 요약
                   </h2>
-                  <p className="mt-4 whitespace-pre-wrap text-[13px] leading-[1.7]">
+                  <p className="mt-4 whitespace-pre-wrap break-words text-[13px] leading-[1.7] [overflow-wrap:anywhere]">
                     {analysis.summary}
                   </p>
                 </section>
@@ -249,7 +249,7 @@ export function AnalysisPanel({
                 <h2 className={headingClass}>
                   <i className="fa-regular fa-star text-[#8050eb]" />핵심 목표
                 </h2>
-                <p className="mt-4 text-[13px] leading-[1.7]">{analysis.core_goal}</p>
+                <p className="mt-4 break-words text-[13px] leading-[1.7] [overflow-wrap:anywhere]">{analysis.core_goal}</p>
                 <div className="mt-4">
                   <div className="mb-2 flex items-center justify-between text-[11px] text-[#777187]">
                     <span>업무 진행률</span>
@@ -278,7 +278,7 @@ export function AnalysisPanel({
                 </div>
                 <ul className="mt-[19px] grid list-none gap-[14px] p-0">
                   {analysis.tasks.map((task) => (
-                    <li className="rounded-xl border border-[#ece9f3] p-3" key={task.id}>
+                    <li className="min-w-0 max-w-full rounded-xl border border-[#ece9f3] p-3" key={task.id}>
                       <div className="flex items-start gap-2.5">
                         <input
                           className="mt-0.5 h-[17px] w-[17px] accent-[#8050e9]"
@@ -292,11 +292,11 @@ export function AnalysisPanel({
                           aria-label={`${task.title} 완료 상태`}
                         />
                         <div className="min-w-0 flex-1">
-                          <strong className={`block text-[13px] ${task.status === "done" ? "text-[#8d8799] line-through" : ""}`}>
+                          <strong className={`block break-words text-[13px] [overflow-wrap:anywhere] ${task.status === "done" ? "text-[#8d8799] line-through" : ""}`}>
                             {task.order}. {task.title}
                           </strong>
                           {task.description && (
-                            <span className="mt-1 block text-xs leading-[1.5] text-[#6f697d]">
+                            <span className="mt-1 block break-words text-xs leading-[1.5] text-[#6f697d] [overflow-wrap:anywhere]">
                               {task.description}
                             </span>
                           )}
@@ -405,9 +405,9 @@ export function AnalysisPanel({
                 <h2 className={headingClass}>
                   <i className="fa-regular fa-bell text-[#8050eb]" />업무 알림
                 </h2>
-                <div className="mt-4 grid gap-2">
+                <div className="mt-4 grid min-w-0 max-w-full gap-2">
                   <select
-                    className="rounded-lg border border-[#ded9e9] bg-white px-3 py-2 text-xs"
+                    className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] bg-white px-3 py-2 text-xs"
                     value={reminderTaskId}
                     onChange={(event) => setReminderTaskId(event.target.value)}
                   >
@@ -417,13 +417,13 @@ export function AnalysisPanel({
                     ))}
                   </select>
                   <input
-                    className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+                    className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
                     value={reminderMessage}
                     onChange={(event) => setReminderMessage(event.target.value)}
                     placeholder="알림 문구"
                   />
                   <input
-                    className="rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
+                    className="w-full min-w-0 max-w-full rounded-lg border border-[#ded9e9] px-3 py-2 text-xs"
                     type="datetime-local"
                     value={reminderAt}
                     onChange={(event) => setReminderAt(event.target.value)}

@@ -271,7 +271,7 @@ class ChatService:
     @staticmethod
     def _requested_extension(message: str) -> str | None:
         matches = re.findall(
-            r"(?:\.|\b)(txt|md|csv|json|xml|yaml|yml|html|css|js|jsx|ts|tsx|py|sql|java|c|cpp|h|log|pdf|docx)\b",
+            r"(?<![a-z0-9])\.?(docx|json|yaml|html|jsx|tsx|cpp|txt|md|csv|xml|yml|css|js|ts|py|sql|java|c|h|log|pdf)(?![a-z0-9])",
             message.lower(),
         )
         return matches[-1] if matches else None
@@ -298,8 +298,18 @@ class ChatService:
         """파일 생성 요청에서는 모델 누락과 관계없이 다운로드 파일을 보장한다."""
         if not uploads or not self._is_file_generation_request(request.message):
             return generated_files
+        requested_extension = self._requested_extension(request.message)
         if generated_files:
-            return generated_files
+            if not requested_extension:
+                return generated_files
+            return [
+                {
+                    **generated,
+                    "name": f"{Path(generated['name']).stem}.{requested_extension}",
+                    "mime_type": self.file_service.mime_type_for_extension(requested_extension),
+                }
+                for generated in generated_files
+            ]
 
         upload = uploads[0]
         extension = self._default_output_extension(request.message, upload)
